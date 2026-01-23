@@ -114,6 +114,10 @@ ExternalProject_Add(poppler_ext
         "${DEPS_LIB_DIR}/libpoppler-glib${PLATFORM_LIB_SUFFIX}"
 )
 
+# ============== System Dependencies (via pkg-config) ==============
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(GLIB REQUIRED glib-2.0 gobject-2.0)
+
 # ============== Python Module ==============
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 
@@ -131,20 +135,19 @@ target_include_directories(_core PRIVATE
     ${DEPS_INCLUDE_DIR}/poppler
     ${DEPS_INCLUDE_DIR}/poppler/glib
     ${DEPS_INCLUDE_DIR}/cairo
-    ${DEPS_INCLUDE_DIR}/glib-2.0
-    ${DEPS_LIB_DIR}/glib-2.0/include
-    ${DEPS_INCLUDE_DIR}/freetype2
-    ${DEPS_INCLUDE_DIR}/libpng16
+    ${GLIB_INCLUDE_DIRS}
 )
 
-target_link_directories(_core PRIVATE ${DEPS_LIB_DIR})
+target_link_directories(_core PRIVATE
+    ${DEPS_LIB_DIR}
+    ${GLIB_LIBRARY_DIRS}
+)
 
 target_link_libraries(_core PRIVATE
     poppler-glib
     poppler
     cairo
-    gobject-2.0
-    glib-2.0
+    ${GLIB_LIBRARIES}
 )
 
 # Platform-specific RPATH for the module
