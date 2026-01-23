@@ -90,8 +90,16 @@ execute_process(
 list(APPEND CMAKE_PREFIX_PATH "${NB_DIR}")
 find_package(nanobind CONFIG REQUIRED)
 
-nanobind_add_module(_core src/pdf_to_svg/_core.cpp)
+# CairoOutputDev is only built as part of poppler-glib, so we compile it ourselves
+set(CAIRO_OUTPUT_SOURCES
+    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoFontEngine.cc
+    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoOutputDev.cc
+    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoRescaleBox.cc
+)
+
+nanobind_add_module(_core src/pdf_to_svg/_core.cpp ${CAIRO_OUTPUT_SOURCES})
 add_dependencies(_core poppler_ext)
+target_compile_definitions(_core PRIVATE HAVE_CAIRO)
 
 target_include_directories(_core PRIVATE
     ${DEPS_PREFIX}/include
@@ -102,9 +110,14 @@ target_include_directories(_core PRIVATE
     ${FREETYPE_INCLUDE_DIRS}
     ${FONTCONFIG_INCLUDE_DIRS}
 )
+# Poppler config defines needed for Cairo sources
+target_compile_definitions(_core PRIVATE
+    HAVE_FREETYPE_H
+    HAVE_FONTCONFIG
+)
 
-target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib)
-target_link_libraries(_core PRIVATE poppler cairo)
+target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${FREETYPE_LIBRARY_DIRS} ${FONTCONFIG_LIBRARY_DIRS})
+target_link_libraries(_core PRIVATE poppler cairo ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES})
 
 # ============== Install ==============
 install(TARGETS _core LIBRARY DESTINATION pdf_to_svg)
