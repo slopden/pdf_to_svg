@@ -6,58 +6,23 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(ExternalProject)
 
-# ============== Platform Detection ==============
-if(APPLE)
-    set(PLATFORM_MACOS TRUE)
-    set(PLATFORM_LIB_SUFFIX ".dylib")
-    set(PLATFORM_RPATH_PREFIX "@loader_path")
-    set(LIB_PATTERN "*.dylib*")
-elseif(WIN32)
-    set(PLATFORM_WINDOWS TRUE)
-    set(PLATFORM_LIB_SUFFIX ".dll")
-    set(PLATFORM_RPATH_PREFIX "")
-    set(LIB_PATTERN "*.dll")
-else()
-    set(PLATFORM_LINUX TRUE)
-    set(PLATFORM_LIB_SUFFIX ".so")
-    set(PLATFORM_RPATH_PREFIX "$ORIGIN")
-    set(LIB_PATTERN "*.so*")
-endif()
+set(DEPS_PREFIX "${CMAKE_BINARY_DIR}/deps_install")
 
-# ============== Dependency Paths ==============
-set(DEPS_INSTALL_PREFIX "${CMAKE_BINARY_DIR}/deps_install")
-set(DEPS_LIB_DIR "${DEPS_INSTALL_PREFIX}/lib")
-set(DEPS_INCLUDE_DIR "${DEPS_INSTALL_PREFIX}/include")
-
-# ============== Cairo Build ==============
-# Platform-specific LDFLAGS
-if(PLATFORM_LINUX)
-    set(CAIRO_ENV "LDFLAGS=-Wl,-rpath,${PLATFORM_RPATH_PREFIX}")
-else()
-    set(CAIRO_ENV "")
-endif()
-
+# ============== Cairo (via Meson) ==============
 ExternalProject_Add(cairo_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
-    CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
-        ${CAIRO_ENV}
-        meson setup
-        --prefix=${DEPS_INSTALL_PREFIX}
+    CONFIGURE_COMMAND meson setup
+        --prefix=${DEPS_PREFIX}
         --libdir=lib
         --buildtype=release
         -Ddefault_library=shared
         -Dtests=disabled
         -Dgtk_doc=false
-        -Dlzo=disabled              # FIX: Disable LZO to avoid macOS include path issues
+        -Dlzo=disabled
         -Dquartz=disabled
         -Dxcb=disabled
         -Dxlib=disabled
         -Dxlib-xcb=disabled
-        -Dglib=enabled
-        -Dfreetype=enabled
-        -Dfontconfig=enabled
-        -Dpng=enabled
-        -Dzlib=enabled
         -Dtee=disabled
         -Dspectre=disabled
         -Dsymbol-lookup=disabled
@@ -65,29 +30,16 @@ ExternalProject_Add(cairo_ext
         <SOURCE_DIR>
     BUILD_COMMAND meson compile -C <BINARY_DIR>
     INSTALL_COMMAND meson install -C <BINARY_DIR>
-    BUILD_BYPRODUCTS "${DEPS_LIB_DIR}/libcairo${PLATFORM_LIB_SUFFIX}"
 )
 
-# ============== Poppler Build ==============
-# Platform-specific RPATH args
-if(PLATFORM_WINDOWS)
-    set(POPPLER_RPATH_ARGS "")
-else()
-    set(POPPLER_RPATH_ARGS
-        -DCMAKE_INSTALL_RPATH=${PLATFORM_RPATH_PREFIX}
-        -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
-    )
-endif()
-
+# ============== Poppler (via CMake) ==============
 ExternalProject_Add(poppler_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/poppler"
     CMAKE_ARGS
-        -DCMAKE_INSTALL_PREFIX=${DEPS_INSTALL_PREFIX}
+        -DCMAKE_INSTALL_PREFIX=${DEPS_PREFIX}
+        -DCMAKE_PREFIX_PATH=${DEPS_PREFIX}
         -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_PREFIX_PATH=${DEPS_INSTALL_PREFIX}
         -DCMAKE_INSTALL_LIBDIR=lib
-        ${POPPLER_RPATH_ARGS}
-        -DPKG_CONFIG_PATH=${DEPS_LIB_DIR}/pkgconfig
         -DENABLE_GLIB=ON
         -DENABLE_CPP=OFF
         -DENABLE_QT5=OFF
@@ -109,18 +61,13 @@ ExternalProject_Add(poppler_ext
         -DBUILD_CPP_TESTS=OFF
         -DBUILD_MANUAL_TESTS=OFF
     DEPENDS cairo_ext
-    BUILD_BYPRODUCTS
-        "${DEPS_LIB_DIR}/libpoppler${PLATFORM_LIB_SUFFIX}"
-        "${DEPS_LIB_DIR}/libpoppler-glib${PLATFORM_LIB_SUFFIX}"
 )
 
-# ============== System Dependencies (via pkg-config) ==============
+# ============== Python Module ==============
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(GLIB REQUIRED glib-2.0 gobject-2.0)
 
-# ============== Python Module ==============
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
-
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
     OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE NB_DIR)
@@ -131,44 +78,19 @@ nanobind_add_module(_core src/pdf_to_svg/_core.cpp)
 add_dependencies(_core poppler_ext)
 
 target_include_directories(_core PRIVATE
-    ${DEPS_INCLUDE_DIR}
-    ${DEPS_INCLUDE_DIR}/poppler
-    ${DEPS_INCLUDE_DIR}/poppler/glib
-    ${DEPS_INCLUDE_DIR}/cairo
+    ${DEPS_PREFIX}/include
+    ${DEPS_PREFIX}/include/poppler
+    ${DEPS_PREFIX}/include/poppler/glib
+    ${DEPS_PREFIX}/include/cairo
     ${GLIB_INCLUDE_DIRS}
 )
 
-target_link_directories(_core PRIVATE
-    ${DEPS_LIB_DIR}
-    ${GLIB_LIBRARY_DIRS}
-)
+target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${GLIB_LIBRARY_DIRS})
+target_link_libraries(_core PRIVATE poppler-glib poppler cairo ${GLIB_LIBRARIES})
 
-target_link_libraries(_core PRIVATE
-    poppler-glib
-    poppler
-    cairo
-    ${GLIB_LIBRARIES}
-)
-
-# Platform-specific RPATH for the module
-if(PLATFORM_MACOS)
-    set_target_properties(_core PROPERTIES
-        INSTALL_RPATH "@loader_path/../lib"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-elseif(PLATFORM_LINUX)
-    set_target_properties(_core PROPERTIES
-        INSTALL_RPATH "$ORIGIN/../lib"
-        BUILD_WITH_INSTALL_RPATH TRUE
-    )
-endif()
-
-# ============== Installation ==============
+# ============== Install ==============
 install(TARGETS _core LIBRARY DESTINATION pdf_to_svg)
-
-install(DIRECTORY ${DEPS_LIB_DIR}/ DESTINATION lib
-    FILES_MATCHING
-    PATTERN "${LIB_PATTERN}"
-    PATTERN "pkgconfig" EXCLUDE
-    PATTERN "cmake" EXCLUDE
+install(DIRECTORY ${DEPS_PREFIX}/lib/ DESTINATION pdf_to_svg/.libs
+    FILES_MATCHING PATTERN "*.so*" PATTERN "*.dylib*" PATTERN "*.dll"
+    PATTERN "pkgconfig" EXCLUDE PATTERN "cmake" EXCLUDE
 )
