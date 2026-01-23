@@ -118,6 +118,10 @@ target_compile_definitions(_core PRIVATE
     HAVE_FREETYPE_H
     HAVE_FONTCONFIG
 )
+# Force-include Error.h so error() is declared before Object.h is parsed
+target_compile_options(_core PRIVATE
+    "-include" "${DEPS_PREFIX}/include/poppler/Error.h"
+)
 
 target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${FREETYPE_LIBRARY_DIRS} ${FONTCONFIG_LIBRARY_DIRS})
 target_link_libraries(_core PRIVATE poppler cairo ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES})
