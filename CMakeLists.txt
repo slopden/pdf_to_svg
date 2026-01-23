@@ -43,7 +43,7 @@ ExternalProject_Add(cairo_ext
 ExternalProject_Add(poppler_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/poppler"
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
-        "PKG_CONFIG_PATH=${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+        "PKG_CONFIG_PATH=${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
         ${CMAKE_COMMAND}
         -DCMAKE_INSTALL_PREFIX=${DEPS_PREFIX}
         -DCMAKE_PREFIX_PATH=${DEPS_PREFIX}
