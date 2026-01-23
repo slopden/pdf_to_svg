@@ -1,6 +1,7 @@
 // Converts PDF to SVG in-memory using poppler and cairo
 
 #include <nanobind/nanobind.h>
+#include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
@@ -14,6 +15,7 @@
 #include <string>
 #include <vector>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 
 namespace nb = nanobind;
@@ -105,14 +107,8 @@ static PopplerDocPtr open_document(const char* data, size_t len) {
     return PopplerDocPtr(doc);
 }
 
-// Convert a single page to SVG
+// Convert a single page to SVG (caller must ensure page_num is valid)
 static std::string convert_page(PopplerDocument* doc, int page_num, const UnitInfo& unit_info) {
-    int n_pages = poppler_document_get_n_pages(doc);
-    if (page_num < 0 || page_num >= n_pages) {
-        throw std::out_of_range("Page number out of range: " + std::to_string(page_num) +
-                                " (document has " + std::to_string(n_pages) + " pages)");
-    }
-
     PopplerPagePtr page(poppler_document_get_page(doc, page_num));
     if (!page) {
         throw std::runtime_error("Failed to get page " + std::to_string(page_num));
@@ -156,18 +152,8 @@ static std::string convert_page(PopplerDocument* doc, int page_num, const UnitIn
     return svg_output;
 }
 
-// Python-exposed function: convert single page
-std::string pdf_to_svg(nb::bytes data, int page = 0, const std::string& unit = "pt") {
-    const char* ptr = data.c_str();
-    size_t len = data.size();
-
-    UnitInfo unit_info = get_unit_info(unit);
-    PopplerDocPtr doc = open_document(ptr, len);
-    return convert_page(doc.get(), page, unit_info);
-}
-
-// Python-exposed function: convert all pages
-std::vector<std::string> pdf_to_svg_all(nb::bytes data, const std::string& unit = "pt") {
+// Python-exposed function: convert PDF pages to SVG
+std::vector<std::string> pdf_to_svg(nb::bytes data, std::optional<int> page, const std::string& unit = "pt") {
     const char* ptr = data.c_str();
     size_t len = data.size();
 
@@ -176,51 +162,34 @@ std::vector<std::string> pdf_to_svg_all(nb::bytes data, const std::string& unit 
     int n_pages = poppler_document_get_n_pages(doc.get());
 
     std::vector<std::string> results;
-    results.reserve(n_pages);
 
-    for (int i = 0; i < n_pages; ++i) {
-        results.push_back(convert_page(doc.get(), i, unit_info));
+    if (!page.has_value()) {
+        // Convert all pages
+        results.reserve(n_pages);
+        for (int i = 0; i < n_pages; ++i) {
+            results.push_back(convert_page(doc.get(), i, unit_info));
+        }
+    } else {
+        // Convert single page, return empty if out of range
+        int p = page.value();
+        if (p >= 0 && p < n_pages) {
+            results.push_back(convert_page(doc.get(), p, unit_info));
+        }
     }
 
     return results;
-}
-
-// Python-exposed function: get page count
-int get_page_count(nb::bytes data) {
-    const char* ptr = data.c_str();
-    size_t len = data.size();
-
-    PopplerDocPtr doc = open_document(ptr, len);
-    return poppler_document_get_n_pages(doc.get());
 }
 
 NB_MODULE(_core, m) {
     m.doc() = "PDF to SVG conversion using poppler and cairo";
 
     m.def("pdf_to_svg", &pdf_to_svg,
-          nb::arg("data"), nb::arg("page") = 0, nb::arg("unit") = "pt",
-          "Convert a single page of a PDF to SVG.\n\n"
+          nb::arg("data"), nb::arg("page") = nb::none(), nb::arg("unit") = "pt",
+          "Convert PDF to SVG.\n\n"
           "Args:\n"
           "    data: PDF file contents as bytes\n"
-          "    page: Page number (0-indexed, default 0)\n"
-          "    unit: SVG unit for dimensions (default 'pt'). Options: pt, in, mm, cm, px, pc\n\n"
+          "    page: Page index (0-based), or None for all pages\n"
+          "    unit: SVG dimension unit (pt, in, mm, cm, px, pc)\n\n"
           "Returns:\n"
-          "    SVG content as a string");
-
-    m.def("pdf_to_svg_all", &pdf_to_svg_all,
-          nb::arg("data"), nb::arg("unit") = "pt",
-          "Convert all pages of a PDF to SVG.\n\n"
-          "Args:\n"
-          "    data: PDF file contents as bytes\n"
-          "    unit: SVG unit for dimensions (default 'pt'). Options: pt, in, mm, cm, px, pc\n\n"
-          "Returns:\n"
-          "    List of SVG strings, one per page");
-
-    m.def("get_page_count", &get_page_count,
-          nb::arg("data"),
-          "Get the number of pages in a PDF.\n\n"
-          "Args:\n"
-          "    data: PDF file contents as bytes\n\n"
-          "Returns:\n"
-          "    Number of pages");
+          "    List of SVG strings. Empty if page doesn't exist.");
 }

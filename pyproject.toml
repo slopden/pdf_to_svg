@@ -14,3 +14,8 @@ test = ["pytest"]
 [tool.scikit-build]
 wheel.packages = ["src/pdf_to_svg"]
 cmake.build-type = "Release"
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14.14",
+]
