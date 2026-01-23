@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.17)
 project(pdf_to_svg LANGUAGES CXX C)
 
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 include(ExternalProject)
 
-set(DEPS_PREFIX "${CMAKE_BINARY_DIR}/deps_install")
+# Use a fixed path for deps so auditwheel can find them
+set(DEPS_PREFIX "${CMAKE_SOURCE_DIR}/_deps_install")
 
 # ============== Cairo (via Meson) ==============
 ExternalProject_Add(cairo_ext
@@ -47,6 +48,7 @@ ExternalProject_Add(poppler_ext
         -DCMAKE_INSTALL_PREFIX=${DEPS_PREFIX}
         -DCMAKE_PREFIX_PATH=${DEPS_PREFIX}
         -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_CXX_STANDARD=20
         -DCMAKE_INSTALL_LIBDIR=lib
         -DENABLE_GLIB=OFF
         -DENABLE_CPP=OFF
@@ -77,6 +79,9 @@ ExternalProject_Add(poppler_ext
 )
 
 # ============== Python Module ==============
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FREETYPE REQUIRED freetype2)
+
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
@@ -93,6 +98,7 @@ target_include_directories(_core PRIVATE
     ${DEPS_PREFIX}/include/cairo
     ${CMAKE_SOURCE_DIR}/upstream/poppler
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler
+    ${FREETYPE_INCLUDE_DIRS}
 )
 
 target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib)

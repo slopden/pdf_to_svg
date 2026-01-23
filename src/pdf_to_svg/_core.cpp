@@ -9,6 +9,7 @@
 #include <GlobalParams.h>
 #include <CairoOutputDev.h>
 #include <Object.h>
+#include <goo/gmem.h>
 
 #include <cairo.h>
 #include <cairo-svg.h>
@@ -131,12 +132,12 @@ std::vector<std::string> pdf_to_svg(nb::bytes data, std::optional<int> page, con
     std::memcpy(data_copy, ptr, len);
 
     // Create memory stream - Object() creates a null object for dict
-    // MemStream takes ownership of data_copy when doDecrypt=false (last param)
+    // MemStream takes ownership of data_copy
     Object obj;
-    MemStream* stream = new MemStream(data_copy, 0, len, std::move(obj));
+    auto stream = std::make_unique<MemStream>(data_copy, 0, len, std::move(obj));
 
     // Create PDFDoc - takes ownership of stream
-    PDFDoc doc(stream);
+    PDFDoc doc(std::move(stream));
 
     if (!doc.isOk()) {
         int error_code = doc.getErrorCode();
