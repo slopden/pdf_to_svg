@@ -79,9 +79,12 @@ ExternalProject_Add(poppler_ext
 )
 
 # ============== Python Module ==============
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(FREETYPE REQUIRED freetype2)
-pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
+# pkg-config is not available on Windows
+if(NOT WIN32)
+    find_package(PkgConfig REQUIRED)
+    pkg_check_modules(FREETYPE REQUIRED freetype2)
+    pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
+endif()
 
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 execute_process(
