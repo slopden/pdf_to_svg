@@ -102,6 +102,7 @@ add_dependencies(_core poppler_ext)
 target_compile_definitions(_core PRIVATE HAVE_CAIRO)
 
 target_include_directories(_core PRIVATE
+    ${CMAKE_SOURCE_DIR}/src  # For our config.h
     ${DEPS_PREFIX}/include
     ${DEPS_PREFIX}/include/poppler
     ${DEPS_PREFIX}/include/cairo
