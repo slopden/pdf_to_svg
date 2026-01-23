@@ -26,7 +26,7 @@ ExternalProject_Add(cairo_ext
         -Dtee=disabled
         -Dspectre=disabled
         -Dsymbol-lookup=disabled
-        -Dglib=enabled
+        -Dglib=disabled
         -Dfreetype=enabled
         -Dfontconfig=enabled
         -Dpng=enabled
@@ -38,15 +38,19 @@ ExternalProject_Add(cairo_ext
 )
 
 # ============== Poppler (via CMake) ==============
+# Use custom CONFIGURE_COMMAND to set PKG_CONFIG_PATH so poppler can find cairo
 ExternalProject_Add(poppler_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/poppler"
-    CMAKE_ARGS
+    CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
+        "PKG_CONFIG_PATH=${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+        ${CMAKE_COMMAND}
         -DCMAKE_INSTALL_PREFIX=${DEPS_PREFIX}
         -DCMAKE_PREFIX_PATH=${DEPS_PREFIX}
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_LIBDIR=lib
-        -DENABLE_GLIB=ON
+        -DENABLE_GLIB=OFF
         -DENABLE_CPP=OFF
+        -DENABLE_UNSTABLE_API_ABI_HEADERS=ON
         -DENABLE_QT5=OFF
         -DENABLE_QT6=OFF
         -DENABLE_UTILS=OFF
@@ -65,13 +69,14 @@ ExternalProject_Add(poppler_ext
         -DBUILD_QT6_TESTS=OFF
         -DBUILD_CPP_TESTS=OFF
         -DBUILD_MANUAL_TESTS=OFF
+        -S <SOURCE_DIR>
+        -B <BINARY_DIR>
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
+    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
     DEPENDS cairo_ext
 )
 
 # ============== Python Module ==============
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(GLIB REQUIRED glib-2.0 gobject-2.0)
-
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
@@ -85,13 +90,13 @@ add_dependencies(_core poppler_ext)
 target_include_directories(_core PRIVATE
     ${DEPS_PREFIX}/include
     ${DEPS_PREFIX}/include/poppler
-    ${DEPS_PREFIX}/include/poppler/glib
     ${DEPS_PREFIX}/include/cairo
-    ${GLIB_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/upstream/poppler
+    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler
 )
 
-target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${GLIB_LIBRARY_DIRS})
-target_link_libraries(_core PRIVATE poppler-glib poppler cairo ${GLIB_LIBRARIES})
+target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib)
+target_link_libraries(_core PRIVATE poppler cairo)
 
 # ============== Install ==============
 install(TARGETS _core LIBRARY DESTINATION pdf_to_svg)

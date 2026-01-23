@@ -1,14 +1,15 @@
-// Converts PDF to SVG in-memory using poppler and cairo
+// Converts PDF to SVG in-memory using poppler core C++ API and cairo
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
 
-#include <glib.h>
-#include <poppler.h>
-#include <poppler-document.h>
-#include <poppler-page.h>
+#include <PDFDoc.h>
+#include <GlobalParams.h>
+#include <CairoOutputDev.h>
+#include <Object.h>
+
 #include <cairo.h>
 #include <cairo-svg.h>
 
@@ -17,32 +18,9 @@
 #include <memory>
 #include <optional>
 #include <stdexcept>
+#include <cstring>
 
 namespace nb = nanobind;
-
-// RAII wrapper for GBytes
-struct GBytesDeleter {
-    void operator()(GBytes* bytes) const {
-        if (bytes) g_bytes_unref(bytes);
-    }
-};
-using GBytesPtr = std::unique_ptr<GBytes, GBytesDeleter>;
-
-// RAII wrapper for PopplerDocument
-struct PopplerDocDeleter {
-    void operator()(PopplerDocument* doc) const {
-        if (doc) g_object_unref(doc);
-    }
-};
-using PopplerDocPtr = std::unique_ptr<PopplerDocument, PopplerDocDeleter>;
-
-// RAII wrapper for PopplerPage
-struct PopplerPageDeleter {
-    void operator()(PopplerPage* page) const {
-        if (page) g_object_unref(page);
-    }
-};
-using PopplerPagePtr = std::unique_ptr<PopplerPage, PopplerPageDeleter>;
 
 // RAII wrapper for cairo_surface_t
 struct CairoSurfaceDeleter {
@@ -83,40 +61,20 @@ static UnitInfo get_unit_info(const std::string& unit) {
     throw std::invalid_argument("Unknown unit: " + unit + ". Valid units: pt, in, mm, cm, px, pc");
 }
 
-// Open a PDF document from bytes
-static PopplerDocPtr open_document(const char* data, size_t len) {
-    // Use g_bytes_new_static because nanobind keeps Python bytes alive during call
-    GBytesPtr bytes(g_bytes_new_static(data, len));
-    if (!bytes) {
-        throw std::runtime_error("Failed to create GBytes");
+// Initialize global params once
+static void ensure_global_params() {
+    static bool initialized = false;
+    if (!initialized) {
+        globalParams = std::make_unique<GlobalParams>();
+        initialized = true;
     }
-
-    GError* error = nullptr;
-    PopplerDocument* doc = poppler_document_new_from_bytes(bytes.get(), nullptr, &error);
-
-    if (!doc) {
-        std::string msg = "Failed to open PDF document";
-        if (error) {
-            msg += ": ";
-            msg += error->message;
-            g_error_free(error);
-        }
-        throw std::runtime_error(msg);
-    }
-
-    return PopplerDocPtr(doc);
 }
 
-// Convert a single page to SVG (caller must ensure page_num is valid)
-static std::string convert_page(PopplerDocument* doc, int page_num, const UnitInfo& unit_info) {
-    PopplerPagePtr page(poppler_document_get_page(doc, page_num));
-    if (!page) {
-        throw std::runtime_error("Failed to get page " + std::to_string(page_num));
-    }
-
-    // poppler returns dimensions in points
-    double width_pt, height_pt;
-    poppler_page_get_size(page.get(), &width_pt, &height_pt);
+// Convert a single page to SVG (page_num is 1-indexed for PDFDoc)
+static std::string convert_page(PDFDoc* doc, int page_num, const UnitInfo& unit_info) {
+    // Get page dimensions in points (1-indexed)
+    double width_pt = doc->getPageMediaWidth(page_num);
+    double height_pt = doc->getPageMediaHeight(page_num);
 
     // Convert to target unit for SVG dimensions
     double width = width_pt * unit_info.from_points;
@@ -142,7 +100,14 @@ static std::string convert_page(PopplerDocument* doc, int page_num, const UnitIn
     // Scale the rendering to match the unit conversion
     cairo_scale(cr.get(), unit_info.from_points, unit_info.from_points);
 
-    poppler_page_render_for_printing(page.get(), cr.get());
+    // Create CairoOutputDev and render
+    CairoOutputDev output_dev;
+    output_dev.setCairo(cr.get());
+    output_dev.startDoc(doc);
+
+    // displayPage params: outputDev, page, hDPI, vDPI, rotate, useMediaBox, crop, printing
+    doc->displayPage(&output_dev, page_num, 72.0, 72.0, 0, true, false, true);
+
     cairo_show_page(cr.get());
 
     // Destroy in order to flush output
@@ -157,23 +122,41 @@ std::vector<std::string> pdf_to_svg(nb::bytes data, std::optional<int> page, con
     const char* ptr = data.c_str();
     size_t len = data.size();
 
+    ensure_global_params();
     UnitInfo unit_info = get_unit_info(unit);
-    PopplerDocPtr doc = open_document(ptr, len);
-    int n_pages = poppler_document_get_n_pages(doc.get());
 
+    // Create a copy of the data that PDFDoc can own
+    // MemStream requires a non-const char* and may modify/free it
+    char* data_copy = static_cast<char*>(gmalloc(len));
+    std::memcpy(data_copy, ptr, len);
+
+    // Create memory stream - Object() creates a null object for dict
+    // MemStream takes ownership of data_copy when doDecrypt=false (last param)
+    Object obj;
+    MemStream* stream = new MemStream(data_copy, 0, len, std::move(obj));
+
+    // Create PDFDoc - takes ownership of stream
+    PDFDoc doc(stream);
+
+    if (!doc.isOk()) {
+        int error_code = doc.getErrorCode();
+        throw std::runtime_error("Failed to open PDF document (error code: " + std::to_string(error_code) + ")");
+    }
+
+    int n_pages = doc.getNumPages();
     std::vector<std::string> results;
 
     if (!page.has_value()) {
         // Convert all pages
         results.reserve(n_pages);
-        for (int i = 0; i < n_pages; ++i) {
-            results.push_back(convert_page(doc.get(), i, unit_info));
+        for (int i = 1; i <= n_pages; ++i) {  // 1-indexed
+            results.push_back(convert_page(&doc, i, unit_info));
         }
     } else {
-        // Convert single page, return empty if out of range
-        int p = page.value();
-        if (p >= 0 && p < n_pages) {
-            results.push_back(convert_page(doc.get(), p, unit_info));
+        // Convert single page (user provides 0-based, PDFDoc uses 1-based)
+        int p = page.value() + 1;  // Convert to 1-indexed
+        if (p >= 1 && p <= n_pages) {
+            results.push_back(convert_page(&doc, p, unit_info));
         }
     }
 
