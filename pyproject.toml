@@ -19,3 +19,16 @@ cmake.build-type = "Release"
 dev = [
     "ruff>=0.14.14",
 ]
+
+[tool.cibuildwheel]
+skip = "pp* *-musllinux*"
+
+[tool.cibuildwheel.linux]
+before-all = "yum install -y glib2-devel freetype-devel fontconfig-devel libpng-devel pixman-devel zlib-devel meson ninja-build"
+
+[tool.cibuildwheel.macos]
+before-all = "brew install glib freetype fontconfig libpng pixman zlib meson ninja pkg-config"
+
+[tool.cibuildwheel.windows]
+before-all = "vcpkg install glib freetype fontconfig libpng zlib pixman --triplet x64-windows"
+environment = { CMAKE_TOOLCHAIN_FILE = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" }
