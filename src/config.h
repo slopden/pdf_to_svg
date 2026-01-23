@@ -6,4 +6,7 @@
 #define PACKAGE_VERSION "24.0.0"
 #define VERSION PACKAGE_VERSION
 
+// Include Error.h for the error() function used by Object.h macros
+#include "Error.h"
+
 #endif
