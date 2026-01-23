@@ -26,6 +26,11 @@ ExternalProject_Add(cairo_ext
         -Dtee=disabled
         -Dspectre=disabled
         -Dsymbol-lookup=disabled
+        -Dglib=enabled
+        -Dfreetype=enabled
+        -Dfontconfig=enabled
+        -Dpng=enabled
+        -Dzlib=enabled
         <BINARY_DIR>
         <SOURCE_DIR>
     BUILD_COMMAND meson compile -C <BINARY_DIR>
