@@ -82,11 +82,11 @@ ExternalProject_Add(poppler_ext
 # On Windows use find_package (vcpkg), on Unix use pkg-config
 if(WIN32)
     find_package(Freetype REQUIRED)
-    find_package(unofficial-fontconfig CONFIG REQUIRED)
+    find_package(Fontconfig REQUIRED)
     set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS})
     set(FREETYPE_LIBRARIES Freetype::Freetype)
     set(FONTCONFIG_INCLUDE_DIRS "")
-    set(FONTCONFIG_LIBRARIES unofficial::fontconfig::fontconfig)
+    set(FONTCONFIG_LIBRARIES Fontconfig::Fontconfig)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FREETYPE REQUIRED freetype2)
