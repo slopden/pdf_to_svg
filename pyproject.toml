@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "meson>=1.3"]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "meson>=1.3", "ninja"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -31,4 +31,4 @@ repair-wheel-command = "DYLD_LIBRARY_PATH={project}/_deps_install/lib delocate-w
 
 [tool.cibuildwheel.windows]
 before-all = "vcpkg install freetype fontconfig libpng zlib pixman --triplet x64-windows"
-environment = { CMAKE_TOOLCHAIN_FILE = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" }
+environment = { CMAKE_TOOLCHAIN_FILE = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake", CMAKE_GENERATOR = "Ninja" }
