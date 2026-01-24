@@ -17,7 +17,7 @@ wheel.packages = ["src/pdf_to_svg"]
 cmake.build-type = "Release"
 
 [tool.cibuildwheel]
-skip = "*-musllinux*"
+skip = "*-musllinux* *-win*"
 
 [tool.cibuildwheel.linux]
 before-all = "yum install -y freetype-devel fontconfig-devel libpng-devel pixman-devel zlib-devel meson ninja-build"
