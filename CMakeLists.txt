@@ -79,8 +79,15 @@ ExternalProject_Add(poppler_ext
 )
 
 # ============== Python Module ==============
-# pkg-config is not available on Windows
-if(NOT WIN32)
+# On Windows use find_package (vcpkg), on Unix use pkg-config
+if(WIN32)
+    find_package(Freetype REQUIRED)
+    find_package(unofficial-fontconfig CONFIG REQUIRED)
+    set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS})
+    set(FREETYPE_LIBRARIES Freetype::Freetype)
+    set(FONTCONFIG_INCLUDE_DIRS "")
+    set(FONTCONFIG_LIBRARIES unofficial::fontconfig::fontconfig)
+else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FREETYPE REQUIRED freetype2)
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
@@ -122,9 +129,11 @@ target_compile_definitions(_core PRIVATE
     HAVE_FONTCONFIG
 )
 # Force-include Error.h so error() is declared before Object.h is parsed
-target_compile_options(_core PRIVATE
-    "-include" "${DEPS_PREFIX}/include/poppler/Error.h"
-)
+if(MSVC)
+    target_compile_options(_core PRIVATE "/FI${DEPS_PREFIX}/include/poppler/Error.h")
+else()
+    target_compile_options(_core PRIVATE "-include" "${DEPS_PREFIX}/include/poppler/Error.h")
+endif()
 
 target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${FREETYPE_LIBRARY_DIRS} ${FONTCONFIG_LIBRARY_DIRS})
 target_link_libraries(_core PRIVATE poppler cairo ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES})
