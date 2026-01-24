@@ -10,17 +10,35 @@ include(ExternalProject)
 set(DEPS_PREFIX "${CMAKE_SOURCE_DIR}/_deps_install")
 
 # ============== Cairo (via Meson) ==============
-# Use --vsenv on Windows to force MSVC environment (ensures correct link.exe is found)
+# Platform-specific cairo configuration
 if(WIN32)
-    set(MESON_VSENV_FLAG "--vsenv")
+    # Use --vsenv to force MSVC environment (ensures correct link.exe is found)
+    # On Windows, use DWrite for fonts instead of fontconfig (fc-cache fails on CI)
+    set(CAIRO_MESON_OPTIONS
+        --vsenv
+        --prefix=${DEPS_PREFIX}
+        --libdir=lib
+        --buildtype=release
+        -Ddefault_library=shared
+        -Dtests=disabled
+        -Dgtk_doc=false
+        -Dlzo=disabled
+        -Dquartz=disabled
+        -Dxcb=disabled
+        -Dxlib=disabled
+        -Dxlib-xcb=disabled
+        -Dtee=disabled
+        -Dspectre=disabled
+        -Dsymbol-lookup=disabled
+        -Dglib=disabled
+        -Dfreetype=enabled
+        -Dfontconfig=disabled
+        -Ddwrite=enabled
+        -Dpng=enabled
+        -Dzlib=enabled
+    )
 else()
-    set(MESON_VSENV_FLAG "")
-endif()
-
-ExternalProject_Add(cairo_ext
-    SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
-    CONFIGURE_COMMAND meson setup
-        ${MESON_VSENV_FLAG}
+    set(CAIRO_MESON_OPTIONS
         --prefix=${DEPS_PREFIX}
         --libdir=lib
         --buildtype=release
@@ -40,8 +58,12 @@ ExternalProject_Add(cairo_ext
         -Dfontconfig=enabled
         -Dpng=enabled
         -Dzlib=enabled
-        <BINARY_DIR>
-        <SOURCE_DIR>
+    )
+endif()
+
+ExternalProject_Add(cairo_ext
+    SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
+    CONFIGURE_COMMAND meson setup ${CAIRO_MESON_OPTIONS} <BINARY_DIR> <SOURCE_DIR>
     BUILD_COMMAND meson compile -C <BINARY_DIR>
     INSTALL_COMMAND meson install -C <BINARY_DIR>
 )
@@ -90,15 +112,15 @@ ExternalProject_Add(poppler_ext
 )
 
 # ============== Python Module ==============
-# On Windows use find_package (vcpkg) for freetype/fontconfig, on Unix use pkg-config
+# On Windows use find_package (vcpkg), on Unix use pkg-config
 # Cairo is built from source on all platforms
 if(WIN32)
+    # Windows uses DWrite for fonts, not fontconfig
     find_package(Freetype REQUIRED)
-    find_package(Fontconfig REQUIRED)
     set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS})
     set(FREETYPE_LIBRARIES Freetype::Freetype)
     set(FONTCONFIG_INCLUDE_DIRS "")
-    set(FONTCONFIG_LIBRARIES Fontconfig::Fontconfig)
+    set(FONTCONFIG_LIBRARIES "")
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FREETYPE REQUIRED freetype2)
@@ -139,10 +161,10 @@ target_include_directories(_core PRIVATE
     ${FONTCONFIG_INCLUDE_DIRS}
 )
 # Poppler config defines needed for Cairo sources
-target_compile_definitions(_core PRIVATE
-    HAVE_FREETYPE_H
-    HAVE_FONTCONFIG
-)
+target_compile_definitions(_core PRIVATE HAVE_FREETYPE_H)
+if(NOT WIN32)
+    target_compile_definitions(_core PRIVATE HAVE_FONTCONFIG)
+endif()
 # Force-include Error.h so error() is declared before Object.h is parsed
 if(MSVC)
     target_compile_options(_core PRIVATE "/FI${DEPS_PREFIX}/include/poppler/Error.h")
