@@ -106,8 +106,8 @@ ExternalProject_Add(poppler_ext
         -DBUILD_MANUAL_TESTS=OFF
         -S <SOURCE_DIR>
         -B <BINARY_DIR>
-    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
-    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
+    BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release
+    INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config Release
     DEPENDS ${POPPLER_DEPENDS}
 )
 
