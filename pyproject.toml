@@ -7,7 +7,7 @@ name = "pdf_to_svg"
 version = "0.1.0"
 description = "Convert PDF to SVG in-memory using poppler and cairo"
 requires-python = ">=3.9"
-readme = {text = "Convert PDF to SVG in-memory using poppler and cairo.", content-type = "text/plain"}
+readme = "README.md"
 
 [project.optional-dependencies]
 test = ["pytest"]
