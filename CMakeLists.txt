@@ -9,43 +9,44 @@ include(ExternalProject)
 # Use a fixed path for deps so auditwheel can find them
 set(DEPS_PREFIX "${CMAKE_SOURCE_DIR}/_deps_install")
 
-# On Windows, use vcpkg cairo. On Unix, build from source.
-if(NOT WIN32)
-    # ============== Cairo (via Meson) ==============
-    ExternalProject_Add(cairo_ext
-        SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
-        CONFIGURE_COMMAND meson setup
-            --prefix=${DEPS_PREFIX}
-            --libdir=lib
-            --buildtype=release
-            -Ddefault_library=shared
-            -Dtests=disabled
-            -Dgtk_doc=false
-            -Dlzo=disabled
-            -Dquartz=disabled
-            -Dxcb=disabled
-            -Dxlib=disabled
-            -Dxlib-xcb=disabled
-            -Dtee=disabled
-            -Dspectre=disabled
-            -Dsymbol-lookup=disabled
-            -Dglib=disabled
-            -Dfreetype=enabled
-            -Dfontconfig=enabled
-            -Dpng=enabled
-            -Dzlib=enabled
-            <BINARY_DIR>
-            <SOURCE_DIR>
-        BUILD_COMMAND meson compile -C <BINARY_DIR>
-        INSTALL_COMMAND meson install -C <BINARY_DIR>
-    )
-    set(POPPLER_DEPENDS cairo_ext)
-    set(POPPLER_PKG_CONFIG_PATH "${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+# ============== Cairo (via Meson) ==============
+# Use --vsenv on Windows to force MSVC environment (ensures correct link.exe is found)
+if(WIN32)
+    set(MESON_VSENV_FLAG "--vsenv")
 else()
-    # Windows: use vcpkg cairo, no ExternalProject needed
-    set(POPPLER_DEPENDS "")
-    set(POPPLER_PKG_CONFIG_PATH "")
+    set(MESON_VSENV_FLAG "")
 endif()
+
+ExternalProject_Add(cairo_ext
+    SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
+    CONFIGURE_COMMAND meson setup
+        ${MESON_VSENV_FLAG}
+        --prefix=${DEPS_PREFIX}
+        --libdir=lib
+        --buildtype=release
+        -Ddefault_library=shared
+        -Dtests=disabled
+        -Dgtk_doc=false
+        -Dlzo=disabled
+        -Dquartz=disabled
+        -Dxcb=disabled
+        -Dxlib=disabled
+        -Dxlib-xcb=disabled
+        -Dtee=disabled
+        -Dspectre=disabled
+        -Dsymbol-lookup=disabled
+        -Dglib=disabled
+        -Dfreetype=enabled
+        -Dfontconfig=enabled
+        -Dpng=enabled
+        -Dzlib=enabled
+        <BINARY_DIR>
+        <SOURCE_DIR>
+    BUILD_COMMAND meson compile -C <BINARY_DIR>
+    INSTALL_COMMAND meson install -C <BINARY_DIR>
+)
+set(POPPLER_DEPENDS cairo_ext)
+set(POPPLER_PKG_CONFIG_PATH "${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
 
 # ============== Poppler (via CMake) ==============
 # Use custom CONFIGURE_COMMAND to set PKG_CONFIG_PATH so poppler can find cairo
@@ -89,24 +90,23 @@ ExternalProject_Add(poppler_ext
 )
 
 # ============== Python Module ==============
-# On Windows use find_package (vcpkg), on Unix use pkg-config
+# On Windows use find_package (vcpkg) for freetype/fontconfig, on Unix use pkg-config
+# Cairo is built from source on all platforms
 if(WIN32)
     find_package(Freetype REQUIRED)
     find_package(Fontconfig REQUIRED)
-    find_package(Cairo REQUIRED)
     set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS})
     set(FREETYPE_LIBRARIES Freetype::Freetype)
     set(FONTCONFIG_INCLUDE_DIRS "")
     set(FONTCONFIG_LIBRARIES Fontconfig::Fontconfig)
-    set(CAIRO_INCLUDE_DIRS "")
-    set(CAIRO_LIBRARIES cairo)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FREETYPE REQUIRED freetype2)
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
-    set(CAIRO_INCLUDE_DIRS "${DEPS_PREFIX}/include/cairo")
-    set(CAIRO_LIBRARIES cairo)
 endif()
+# Cairo paths from our build
+set(CAIRO_INCLUDE_DIRS "${DEPS_PREFIX}/include/cairo")
+set(CAIRO_LIBRARIES cairo)
 
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 execute_process(

@@ -17,7 +17,7 @@ wheel.packages = ["src/pdf_to_svg"]
 cmake.build-type = "Release"
 
 [tool.cibuildwheel]
-skip = "*-musllinux* *-win*"
+skip = "*-musllinux*"
 
 [tool.cibuildwheel.linux]
 before-all = "yum install -y freetype-devel fontconfig-devel libpng-devel pixman-devel zlib-devel meson ninja-build"
@@ -30,5 +30,5 @@ environment = { MACOSX_DEPLOYMENT_TARGET = "15.0" }
 repair-wheel-command = "DYLD_LIBRARY_PATH={project}/_deps_install/lib delocate-wheel --require-archs {delocate_archs} -w {dest_dir} -v {wheel}"
 
 [tool.cibuildwheel.windows]
-before-all = "vcpkg install freetype fontconfig libpng zlib pixman cairo --triplet x64-windows"
+before-all = "vcpkg install freetype fontconfig libpng zlib pixman --triplet x64-windows"
 environment = { CMAKE_TOOLCHAIN_FILE = "C:/vcpkg/scripts/buildsystems/vcpkg.cmake" }
