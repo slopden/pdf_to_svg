@@ -139,12 +139,15 @@ find_package(nanobind CONFIG REQUIRED)
 
 # CairoOutputDev is only built as part of poppler-glib, so we compile it ourselves
 # Error.cc provides the error() function needed by Object.h macros
+# On Windows, Error.cc is already in poppler.dll so we don't compile it again
 set(CAIRO_OUTPUT_SOURCES
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoFontEngine.cc
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoOutputDev.cc
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoRescaleBox.cc
-    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/Error.cc
 )
+if(NOT WIN32)
+    list(APPEND CAIRO_OUTPUT_SOURCES ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/Error.cc)
+endif()
 
 nanobind_add_module(_core src/pdf_to_svg/_core.cpp ${CAIRO_OUTPUT_SOURCES})
 add_dependencies(_core poppler_ext)
