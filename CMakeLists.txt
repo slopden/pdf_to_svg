@@ -9,47 +9,57 @@ include(ExternalProject)
 # Use a fixed path for deps so auditwheel can find them
 set(DEPS_PREFIX "${CMAKE_SOURCE_DIR}/_deps_install")
 
-# ============== Cairo (via Meson) ==============
-ExternalProject_Add(cairo_ext
-    SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
-    CONFIGURE_COMMAND meson setup
-        --prefix=${DEPS_PREFIX}
-        --libdir=lib
-        --buildtype=release
-        -Ddefault_library=shared
-        -Dtests=disabled
-        -Dgtk_doc=false
-        -Dlzo=disabled
-        -Dquartz=disabled
-        -Dxcb=disabled
-        -Dxlib=disabled
-        -Dxlib-xcb=disabled
-        -Dtee=disabled
-        -Dspectre=disabled
-        -Dsymbol-lookup=disabled
-        -Dglib=disabled
-        -Dfreetype=enabled
-        -Dfontconfig=enabled
-        -Dpng=enabled
-        -Dzlib=enabled
-        <BINARY_DIR>
-        <SOURCE_DIR>
-    BUILD_COMMAND meson compile -C <BINARY_DIR>
-    INSTALL_COMMAND meson install -C <BINARY_DIR>
-)
+# On Windows, use vcpkg cairo. On Unix, build from source.
+if(NOT WIN32)
+    # ============== Cairo (via Meson) ==============
+    ExternalProject_Add(cairo_ext
+        SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
+        CONFIGURE_COMMAND meson setup
+            --prefix=${DEPS_PREFIX}
+            --libdir=lib
+            --buildtype=release
+            -Ddefault_library=shared
+            -Dtests=disabled
+            -Dgtk_doc=false
+            -Dlzo=disabled
+            -Dquartz=disabled
+            -Dxcb=disabled
+            -Dxlib=disabled
+            -Dxlib-xcb=disabled
+            -Dtee=disabled
+            -Dspectre=disabled
+            -Dsymbol-lookup=disabled
+            -Dglib=disabled
+            -Dfreetype=enabled
+            -Dfontconfig=enabled
+            -Dpng=enabled
+            -Dzlib=enabled
+            <BINARY_DIR>
+            <SOURCE_DIR>
+        BUILD_COMMAND meson compile -C <BINARY_DIR>
+        INSTALL_COMMAND meson install -C <BINARY_DIR>
+    )
+    set(POPPLER_DEPENDS cairo_ext)
+    set(POPPLER_PKG_CONFIG_PATH "${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+else()
+    # Windows: use vcpkg cairo, no ExternalProject needed
+    set(POPPLER_DEPENDS "")
+    set(POPPLER_PKG_CONFIG_PATH "")
+endif()
 
 # ============== Poppler (via CMake) ==============
 # Use custom CONFIGURE_COMMAND to set PKG_CONFIG_PATH so poppler can find cairo
 ExternalProject_Add(poppler_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/poppler"
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
-        "PKG_CONFIG_PATH=${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}"
+        "PKG_CONFIG_PATH=${POPPLER_PKG_CONFIG_PATH}"
         ${CMAKE_COMMAND}
         -DCMAKE_INSTALL_PREFIX=${DEPS_PREFIX}
         -DCMAKE_PREFIX_PATH=${DEPS_PREFIX}
         -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_CXX_STANDARD=20
         -DCMAKE_INSTALL_LIBDIR=lib
+        -DCMAKE_TOOLCHAIN_FILE=${CMAKE_TOOLCHAIN_FILE}
         -DENABLE_GLIB=OFF
         -DENABLE_CPP=OFF
         -DENABLE_UNSTABLE_API_ABI_HEADERS=ON
@@ -75,7 +85,7 @@ ExternalProject_Add(poppler_ext
         -B <BINARY_DIR>
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR>
     INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR>
-    DEPENDS cairo_ext
+    DEPENDS ${POPPLER_DEPENDS}
 )
 
 # ============== Python Module ==============
@@ -83,14 +93,19 @@ ExternalProject_Add(poppler_ext
 if(WIN32)
     find_package(Freetype REQUIRED)
     find_package(Fontconfig REQUIRED)
+    find_package(Cairo REQUIRED)
     set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS})
     set(FREETYPE_LIBRARIES Freetype::Freetype)
     set(FONTCONFIG_INCLUDE_DIRS "")
     set(FONTCONFIG_LIBRARIES Fontconfig::Fontconfig)
+    set(CAIRO_INCLUDE_DIRS "")
+    set(CAIRO_LIBRARIES cairo)
 else()
     find_package(PkgConfig REQUIRED)
     pkg_check_modules(FREETYPE REQUIRED freetype2)
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
+    set(CAIRO_INCLUDE_DIRS "${DEPS_PREFIX}/include/cairo")
+    set(CAIRO_LIBRARIES cairo)
 endif()
 
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
@@ -117,7 +132,7 @@ target_include_directories(_core PRIVATE
     ${CMAKE_SOURCE_DIR}/src  # For our config.h
     ${DEPS_PREFIX}/include
     ${DEPS_PREFIX}/include/poppler
-    ${DEPS_PREFIX}/include/cairo
+    ${CAIRO_INCLUDE_DIRS}
     ${CMAKE_SOURCE_DIR}/upstream/poppler
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler
     ${FREETYPE_INCLUDE_DIRS}
@@ -136,7 +151,7 @@ else()
 endif()
 
 target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${FREETYPE_LIBRARY_DIRS} ${FONTCONFIG_LIBRARY_DIRS})
-target_link_libraries(_core PRIVATE poppler cairo ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES})
+target_link_libraries(_core PRIVATE poppler ${CAIRO_LIBRARIES} ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES})
 
 # ============== Install ==============
 install(TARGETS _core LIBRARY DESTINATION pdf_to_svg)
