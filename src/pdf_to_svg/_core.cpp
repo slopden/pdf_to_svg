@@ -1,4 +1,4 @@
-// Converts PDF to SVG in-memory using poppler core C++ API and cairo
+// PDF <-> SVG conversion using poppler, librsvg, and cairo
 
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/optional.h>
@@ -13,6 +13,8 @@
 
 #include <cairo.h>
 #include <cairo-svg.h>
+#include <cairo-pdf.h>
+#include <librsvg/rsvg.h>
 
 #include <string>
 #include <vector>
@@ -20,36 +22,84 @@
 #include <optional>
 #include <stdexcept>
 #include <cstring>
+#include <mutex>
 
 namespace nb = nanobind;
 
-// RAII wrapper for cairo_surface_t
-struct CairoSurfaceDeleter {
-    void operator()(cairo_surface_t* surface) const {
-        if (surface) cairo_surface_destroy(surface);
-    }
-};
-using CairoSurfacePtr = std::unique_ptr<cairo_surface_t, CairoSurfaceDeleter>;
+// ============================================================================
+// RAII wrappers
+// ============================================================================
 
-// RAII wrapper for cairo_t
+struct CairoSurfaceDeleter {
+    void operator()(cairo_surface_t* s) const { if (s) cairo_surface_destroy(s); }
+};
+using SurfacePtr = std::unique_ptr<cairo_surface_t, CairoSurfaceDeleter>;
+
 struct CairoDeleter {
-    void operator()(cairo_t* cr) const {
-        if (cr) cairo_destroy(cr);
-    }
+    void operator()(cairo_t* cr) const { if (cr) cairo_destroy(cr); }
 };
 using CairoPtr = std::unique_ptr<cairo_t, CairoDeleter>;
 
-// Write callback for cairo_svg_surface_create_for_stream
-static cairo_status_t write_callback(void* closure, const unsigned char* data, unsigned int length) {
-    std::string* output = static_cast<std::string*>(closure);
-    output->append(reinterpret_cast<const char*>(data), length);
+struct RsvgHandleDeleter {
+    void operator()(RsvgHandle* h) const { if (h) g_object_unref(h); }
+};
+using RsvgPtr = std::unique_ptr<RsvgHandle, RsvgHandleDeleter>;
+
+// ============================================================================
+// Shared helpers
+// ============================================================================
+
+// Write callback: appends data to a std::string
+static cairo_status_t write_to_string(void* closure, const unsigned char* data, unsigned int length) {
+    static_cast<std::string*>(closure)->append(reinterpret_cast<const char*>(data), length);
     return CAIRO_STATUS_SUCCESS;
 }
 
-// Unit conversion info
+// Create a cairo context on a surface, checking both for errors
+static CairoPtr make_cairo(cairo_surface_t* surface, const char* what) {
+    if (cairo_surface_status(surface) != CAIRO_STATUS_SUCCESS)
+        throw std::runtime_error(std::string("Failed to create ") + what + " surface");
+    CairoPtr cr(cairo_create(surface));
+    if (cairo_status(cr.get()) != CAIRO_STATUS_SUCCESS)
+        throw std::runtime_error(std::string("Failed to create cairo context for ") + what);
+    return cr;
+}
+
+// Flush output by destroying cairo context then surface (order matters)
+static void flush(CairoPtr& cr, SurfacePtr& surface) {
+    cr.reset();
+    surface.reset();
+}
+
+// ============================================================================
+// Poppler global state
+// ============================================================================
+
+// Release GlobalParams before C++ static destructors run.
+// We compile CairoOutputDev.cc into this .so alongside libpoppler — both
+// have file-scope statics whose destruction order is undefined. Releasing
+// GlobalParams in atexit (which runs before static destructors) avoids
+// use-after-free on shutdown.
+static std::once_flag g_init_flag;
+
+static void release_global_params() {
+    globalParams.reset();
+}
+
+static void ensure_global_params() {
+    std::call_once(g_init_flag, [] {
+        globalParams = std::make_unique<GlobalParams>();
+        std::atexit(release_global_params);
+    });
+}
+
+// ============================================================================
+// PDF → SVG
+// ============================================================================
+
 struct UnitInfo {
     cairo_svg_unit_t cairo_unit;
-    double from_points;  // multiply points by this to get target unit
+    double from_points;
 };
 
 static UnitInfo get_unit_info(const std::string& unit) {
@@ -57,123 +107,142 @@ static UnitInfo get_unit_info(const std::string& unit) {
     if (unit == "in") return {CAIRO_SVG_UNIT_IN, 1.0 / 72.0};
     if (unit == "mm") return {CAIRO_SVG_UNIT_MM, 25.4 / 72.0};
     if (unit == "cm") return {CAIRO_SVG_UNIT_CM, 2.54 / 72.0};
-    if (unit == "px") return {CAIRO_SVG_UNIT_PX, 1.0};  // 1:1 with points at 72 DPI
-    if (unit == "pc") return {CAIRO_SVG_UNIT_PC, 1.0 / 12.0};  // 12 points per pica
-    throw std::invalid_argument("Unknown unit: " + unit + ". Valid units: pt, in, mm, cm, px, pc");
+    if (unit == "px") return {CAIRO_SVG_UNIT_PX, 1.0};
+    if (unit == "pc") return {CAIRO_SVG_UNIT_PC, 1.0 / 12.0};
+    throw std::invalid_argument("Unknown unit: " + unit);
 }
 
-// Initialize global params once
-static void ensure_global_params() {
-    static bool initialized = false;
-    if (!initialized) {
-        globalParams = std::make_unique<GlobalParams>();
-        initialized = true;
-    }
-}
+static std::string convert_page(PDFDoc* doc, int page_num, const UnitInfo& ui) {
+    double w = doc->getPageMediaWidth(page_num) * ui.from_points;
+    double h = doc->getPageMediaHeight(page_num) * ui.from_points;
 
-// Convert a single page to SVG (page_num is 1-indexed for PDFDoc)
-static std::string convert_page(PDFDoc* doc, int page_num, const UnitInfo& unit_info) {
-    // Get page dimensions in points (1-indexed)
-    double width_pt = doc->getPageMediaWidth(page_num);
-    double height_pt = doc->getPageMediaHeight(page_num);
+    std::string out;
+    out.reserve(65536);
 
-    // Convert to target unit for SVG dimensions
-    double width = width_pt * unit_info.from_points;
-    double height = height_pt * unit_info.from_points;
+    SurfacePtr surface(cairo_svg_surface_create_for_stream(write_to_string, &out, w, h));
+    auto cr = make_cairo(surface.get(), "SVG");
+    cairo_svg_surface_set_document_unit(surface.get(), ui.cairo_unit);
+    cairo_scale(cr.get(), ui.from_points, ui.from_points);
 
-    std::string svg_output;
-    svg_output.reserve(65536);  // Pre-allocate for typical SVG size
-
-    CairoSurfacePtr surface(
-        cairo_svg_surface_create_for_stream(write_callback, &svg_output, width, height)
-    );
-    if (cairo_surface_status(surface.get()) != CAIRO_STATUS_SUCCESS) {
-        throw std::runtime_error("Failed to create SVG surface");
-    }
-
-    cairo_svg_surface_set_document_unit(surface.get(), unit_info.cairo_unit);
-
-    CairoPtr cr(cairo_create(surface.get()));
-    if (cairo_status(cr.get()) != CAIRO_STATUS_SUCCESS) {
-        throw std::runtime_error("Failed to create cairo context");
-    }
-
-    // Scale the rendering to match the unit conversion
-    cairo_scale(cr.get(), unit_info.from_points, unit_info.from_points);
-
-    // Create CairoOutputDev and render
-    CairoOutputDev output_dev;
-    output_dev.setCairo(cr.get());
-    output_dev.startDoc(doc);
-
-    // displayPage params: outputDev, page, hDPI, vDPI, rotate, useMediaBox, crop, printing
-    doc->displayPage(&output_dev, page_num, 72.0, 72.0, 0, true, false, true);
-
+    CairoOutputDev dev;
+    dev.setCairo(cr.get());
+    dev.startDoc(doc);
+    doc->displayPage(&dev, page_num, 72.0, 72.0, 0, true, false, true);
     cairo_show_page(cr.get());
 
-    // Destroy in order to flush output
-    cr.reset();
-    surface.reset();
-
-    return svg_output;
+    flush(cr, surface);
+    return out;
 }
 
-// Python-exposed function: convert PDF pages to SVG
-std::vector<std::string> pdf_to_svg(nb::bytes data, std::optional<int> page, const std::string& unit = "pt") {
-    const char* ptr = data.c_str();
-    size_t len = data.size();
-
+std::vector<std::string> pdf_to_svg(const nb::bytes& data, std::optional<int> page, const std::string& unit = "pt") {
     ensure_global_params();
-    UnitInfo unit_info = get_unit_info(unit);
+    UnitInfo ui = get_unit_info(unit);
 
-    // Create a copy of the data that PDFDoc can own
-    // MemStream requires a non-const char* and may modify/free it
-    char* data_copy = static_cast<char*>(gmalloc(len));
-    std::memcpy(data_copy, ptr, len);
+    size_t len = data.size();
+    char* copy = static_cast<char*>(gmalloc(len));
+    std::memcpy(copy, data.c_str(), len);
 
-    // Create memory stream - Object() creates a null object for dict
-    // MemStream takes ownership of data_copy
     Object obj;
-    auto stream = std::make_unique<MemStream>(data_copy, 0, len, std::move(obj));
+    PDFDoc doc(std::make_unique<MemStream>(copy, 0, len, std::move(obj)));
+    if (!doc.isOk())
+        throw std::runtime_error("Failed to open PDF (error " + std::to_string(doc.getErrorCode()) + ")");
 
-    // Create PDFDoc - takes ownership of stream
-    PDFDoc doc(std::move(stream));
-
-    if (!doc.isOk()) {
-        int error_code = doc.getErrorCode();
-        throw std::runtime_error("Failed to open PDF document (error code: " + std::to_string(error_code) + ")");
-    }
-
-    int n_pages = doc.getNumPages();
+    int n = doc.getNumPages();
     std::vector<std::string> results;
 
     if (!page.has_value()) {
-        // Convert all pages
-        results.reserve(n_pages);
-        for (int i = 1; i <= n_pages; ++i) {  // 1-indexed
-            results.push_back(convert_page(&doc, i, unit_info));
-        }
+        results.reserve(n);
+        for (int i = 1; i <= n; ++i)
+            results.push_back(convert_page(&doc, i, ui));
     } else {
-        // Convert single page (user provides 0-based, PDFDoc uses 1-based)
-        int p = page.value() + 1;  // Convert to 1-indexed
-        if (p >= 1 && p <= n_pages) {
-            results.push_back(convert_page(&doc, p, unit_info));
-        }
+        int p = page.value() + 1;
+        if (p < 1 || p > n)
+            throw std::out_of_range("Page " + std::to_string(page.value()) + " out of range [0, " + std::to_string(n - 1) + "]");
+        results.push_back(convert_page(&doc, p, ui));
     }
 
     return results;
 }
 
+// ============================================================================
+// SVG → PDF
+// ============================================================================
+
+// Convert an RsvgLength to points
+static double rsvg_length_to_pt(RsvgLength len) {
+    switch (len.unit) {
+        case RSVG_UNIT_PT:   return len.length;
+        case RSVG_UNIT_PX:   return len.length * 0.75;        // 96 DPI → 72 DPI
+        case RSVG_UNIT_IN:   return len.length * 72.0;
+        case RSVG_UNIT_CM:   return len.length * 72.0 / 2.54;
+        case RSVG_UNIT_MM:   return len.length * 72.0 / 25.4;
+        default:             return len.length;                // EM/EX/% — treat as pt
+    }
+}
+
+nb::bytes svg_to_pdf(const nb::bytes& data) {
+    GError* err = nullptr;
+    RsvgPtr handle(rsvg_handle_new_from_data(
+        reinterpret_cast<const guint8*>(data.c_str()), data.size(), &err));
+    if (!handle) {
+        std::string msg = "Failed to parse SVG";
+        if (err) { msg += ": "; msg += err->message; g_error_free(err); }
+        throw std::runtime_error(msg);
+    }
+
+    // get intrinsic dimensions
+    gboolean has_w = FALSE, has_h = FALSE;
+    RsvgLength rw, rh;
+    rsvg_handle_get_intrinsic_dimensions(handle.get(), &has_w, &rw, &has_h, &rh, nullptr, nullptr);
+
+    double w = (has_w && rw.length > 0) ? rsvg_length_to_pt(rw) : 612.0;  // letter
+    double h = (has_h && rh.length > 0) ? rsvg_length_to_pt(rh) : 792.0;
+
+    std::string out;
+    out.reserve(65536);
+
+    SurfacePtr surface(cairo_pdf_surface_create_for_stream(write_to_string, &out, w, h));
+    auto cr = make_cairo(surface.get(), "PDF");
+
+    RsvgRectangle viewport = {0, 0, w, h};
+    err = nullptr;
+    if (!rsvg_handle_render_document(handle.get(), cr.get(), &viewport, &err)) {
+        std::string msg = "Failed to render SVG";
+        if (err) { msg += ": "; msg += err->message; g_error_free(err); }
+        throw std::runtime_error(msg);
+    }
+
+    cairo_show_page(cr.get());
+    flush(cr, surface);
+
+    return nb::bytes(out.data(), out.size());
+}
+
+// ============================================================================
+// Python module
+// ============================================================================
+
 NB_MODULE(_core, m) {
-    m.doc() = "PDF to SVG conversion using poppler and cairo";
+    m.doc() = "PDF/SVG conversion using poppler, librsvg, and cairo";
 
     m.def("pdf_to_svg", &pdf_to_svg,
           nb::arg("data"), nb::arg("page") = nb::none(), nb::arg("unit") = "pt",
-          "Convert PDF to SVG.\n\n"
+          "Convert PDF pages to SVG strings.\n\n"
           "Args:\n"
-          "    data: PDF file contents as bytes\n"
-          "    page: Page index (0-based), or None for all pages\n"
+          "    data: PDF file as bytes\n"
+          "    page: 0-based page index, or None for all pages\n"
           "    unit: SVG dimension unit (pt, in, mm, cm, px, pc)\n\n"
           "Returns:\n"
-          "    List of SVG strings. Empty if page doesn't exist.");
+          "    List of SVG strings, one per page.\n\n"
+          "Raises:\n"
+          "    RuntimeError: if the PDF is invalid\n"
+          "    out_of_range: if page index is out of bounds");
+
+    m.def("svg_to_pdf", &svg_to_pdf,
+          nb::arg("data"),
+          "Convert SVG to PDF.\n\n"
+          "Args:\n"
+          "    data: SVG file as bytes\n\n"
+          "Returns:\n"
+          "    PDF file as bytes.");
 }

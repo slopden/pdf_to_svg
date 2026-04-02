@@ -71,7 +71,8 @@ set(POPPLER_DEPENDS cairo_ext)
 set(POPPLER_PKG_CONFIG_PATH "${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
 
 # ============== Poppler (via CMake) ==============
-# Use custom CONFIGURE_COMMAND to set PKG_CONFIG_PATH so poppler can find cairo
+# Build poppler core only — we compile CairoOutputDev ourselves since
+# poppler only includes it in the glib frontend (C API, not C++ symbols)
 ExternalProject_Add(poppler_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/poppler"
     CONFIGURE_COMMAND ${CMAKE_COMMAND} -E env
@@ -112,34 +113,29 @@ ExternalProject_Add(poppler_ext
 )
 
 # ============== Python Module ==============
-# On Windows use find_package (vcpkg), on Unix use pkg-config
-# Cairo is built from source on all platforms
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(RSVG REQUIRED librsvg-2.0)
 if(WIN32)
-    # Windows uses DWrite for fonts, not fontconfig
     find_package(Freetype REQUIRED)
     set(FREETYPE_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS})
     set(FREETYPE_LIBRARIES Freetype::Freetype)
     set(FONTCONFIG_INCLUDE_DIRS "")
     set(FONTCONFIG_LIBRARIES "")
 else()
-    find_package(PkgConfig REQUIRED)
     pkg_check_modules(FREETYPE REQUIRED freetype2)
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
 endif()
-# Cairo paths from our build
 set(CAIRO_INCLUDE_DIRS "${DEPS_PREFIX}/include/cairo")
 set(CAIRO_LIBRARIES cairo)
 
-find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
+find_package(Python 3.12 COMPONENTS Interpreter Development.Module REQUIRED)
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -m nanobind --cmake_dir
     OUTPUT_STRIP_TRAILING_WHITESPACE OUTPUT_VARIABLE NB_DIR)
 list(APPEND CMAKE_PREFIX_PATH "${NB_DIR}")
 find_package(nanobind CONFIG REQUIRED)
 
-# CairoOutputDev is only built as part of poppler-glib, so we compile it ourselves
-# Error.cc provides the error() function needed by Object.h macros
-# On Windows, Error.cc is already in poppler.dll so we don't compile it again
+# Compile CairoOutputDev sources into our module (poppler doesn't export them)
 set(CAIRO_OUTPUT_SOURCES
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoFontEngine.cc
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/CairoOutputDev.cc
@@ -149,22 +145,9 @@ if(NOT WIN32)
     list(APPEND CAIRO_OUTPUT_SOURCES ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler/Error.cc)
 endif()
 
-nanobind_add_module(_core src/pdf_to_svg/_core.cpp ${CAIRO_OUTPUT_SOURCES})
+nanobind_add_module(_core STABLE_ABI src/pdf_to_svg/_core.cpp ${CAIRO_OUTPUT_SOURCES})
 add_dependencies(_core poppler_ext)
-target_compile_definitions(_core PRIVATE HAVE_CAIRO)
-
-target_include_directories(_core PRIVATE
-    ${CMAKE_SOURCE_DIR}/src  # For our config.h
-    ${DEPS_PREFIX}/include
-    ${DEPS_PREFIX}/include/poppler
-    ${CAIRO_INCLUDE_DIRS}
-    ${CMAKE_SOURCE_DIR}/upstream/poppler
-    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler
-    ${FREETYPE_INCLUDE_DIRS}
-    ${FONTCONFIG_INCLUDE_DIRS}
-)
-# Poppler config defines needed for Cairo sources
-target_compile_definitions(_core PRIVATE HAVE_FREETYPE_H)
+target_compile_definitions(_core PRIVATE HAVE_CAIRO HAVE_FREETYPE_H)
 if(NOT WIN32)
     target_compile_definitions(_core PRIVATE HAVE_FONTCONFIG)
 endif()
@@ -175,8 +158,34 @@ else()
     target_compile_options(_core PRIVATE "-include" "${DEPS_PREFIX}/include/poppler/Error.h")
 endif()
 
-target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${FREETYPE_LIBRARY_DIRS} ${FONTCONFIG_LIBRARY_DIRS})
-target_link_libraries(_core PRIVATE poppler ${CAIRO_LIBRARIES} ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES})
+target_include_directories(_core PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${DEPS_PREFIX}/include
+    ${DEPS_PREFIX}/include/poppler
+    ${CAIRO_INCLUDE_DIRS}
+    ${CMAKE_SOURCE_DIR}/upstream/poppler
+    ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler
+    ${FREETYPE_INCLUDE_DIRS}
+    ${FONTCONFIG_INCLUDE_DIRS}
+    ${RSVG_INCLUDE_DIRS}
+)
+
+target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${FREETYPE_LIBRARY_DIRS} ${FONTCONFIG_LIBRARY_DIRS} ${RSVG_LIBRARY_DIRS})
+target_link_libraries(_core PRIVATE poppler ${CAIRO_LIBRARIES} ${FREETYPE_LIBRARIES} ${FONTCONFIG_LIBRARIES} ${RSVG_LIBRARIES})
+
+# RPATH so the .so finds bundled libs in .libs/ relative to itself
+if(APPLE)
+    set_target_properties(_core PROPERTIES
+        INSTALL_RPATH "@loader_path/.libs"
+        BUILD_RPATH "${DEPS_PREFIX}/lib"
+    )
+elseif(UNIX)
+    set_target_properties(_core PROPERTIES
+        INSTALL_RPATH "$ORIGIN/.libs"
+        BUILD_RPATH "${DEPS_PREFIX}/lib"
+    )
+endif()
+# Windows: __init__.py calls os.add_dll_directory
 
 # ============== Install ==============
 install(TARGETS _core LIBRARY DESTINATION pdf_to_svg)
