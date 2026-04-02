@@ -17,9 +17,9 @@ set(CAIRO_MESON_OPTIONS
     -Dxlib-xcb=disabled -Dtee=disabled -Dspectre=disabled
     -Dsymbol-lookup=disabled -Dglib=disabled
     -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
-    -Dfreetype:harfbuzz=disabled)
+    -Dfreetype2:harfbuzz=disabled -Dfreetype2:bzip2=disabled -Dfreetype2:brotli=disabled)
 if(WIN32)
-    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled -Dquartz=disabled --force-fallback-for=zlib,libpng,freetype2,pixman)
+    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled -Dquartz=disabled --wrap-mode=forcefallback)
 elseif(APPLE)
     list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=enabled)
 else()
