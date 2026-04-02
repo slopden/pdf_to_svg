@@ -70,28 +70,23 @@ ExternalProject_Add(poppler_ext
     DEPENDS cairo_ext)
 
 # ============== System dependencies ==============
+# pkgconf from vcpkg on Windows, system pkg-config on Linux/macOS.
+# pkg_check_modules resolves all transitive includes/libs automatically.
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(FREETYPE REQUIRED freetype2)
+pkg_check_modules(RSVG REQUIRED librsvg-2.0)
+set(SYS_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS} ${RSVG_INCLUDE_DIRS})
+set(SYS_LIBRARIES ${FREETYPE_LIBRARIES} ${RSVG_LIBRARIES})
+set(SYS_LINK_DIRS ${FREETYPE_LIBRARY_DIRS} ${RSVG_LIBRARY_DIRS})
 if(WIN32)
-    # On Windows, deps come from vcpkg (MSVC-compatible .lib files).
-    # No pkg-config available; use cmake find_package / find_library.
     # _core.cpp calls g_object_unref / g_error_free directly; on Linux/macOS
     # these resolve through librsvg's DSO chain, but Windows needs explicit links.
-    find_package(Freetype REQUIRED)
-    find_path(RSVG_INCLUDE_DIR librsvg/rsvg.h PATH_SUFFIXES librsvg-2.0)
-    find_library(RSVG_LIBRARY rsvg-2)
-    find_path(GLIB_INCLUDE_DIR glib.h PATH_SUFFIXES glib-2.0)
-    find_path(GLIBCONFIG_INCLUDE_DIR glibconfig.h PATH_SUFFIXES lib/glib-2.0/include)
-    find_library(GOBJECT_LIBRARY gobject-2.0)
-    find_library(GLIB_LIBRARY glib-2.0)
-    set(SYS_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS} ${RSVG_INCLUDE_DIR} ${GLIB_INCLUDE_DIR} ${GLIBCONFIG_INCLUDE_DIR})
-    set(SYS_LIBRARIES Freetype::Freetype ${RSVG_LIBRARY} ${GOBJECT_LIBRARY} ${GLIB_LIBRARY})
-    set(SYS_LINK_DIRS "")
+    pkg_check_modules(GOBJECT REQUIRED gobject-2.0)
+    pkg_check_modules(GLIB REQUIRED glib-2.0)
+    list(APPEND SYS_INCLUDE_DIRS ${GOBJECT_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
+    list(APPEND SYS_LIBRARIES ${GOBJECT_LIBRARIES} ${GLIB_LIBRARIES})
+    list(APPEND SYS_LINK_DIRS ${GOBJECT_LIBRARY_DIRS} ${GLIB_LIBRARY_DIRS})
 else()
-    find_package(PkgConfig REQUIRED)
-    pkg_check_modules(FREETYPE REQUIRED freetype2)
-    pkg_check_modules(RSVG REQUIRED librsvg-2.0)
-    set(SYS_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS} ${RSVG_INCLUDE_DIRS})
-    set(SYS_LIBRARIES ${FREETYPE_LIBRARIES} ${RSVG_LIBRARIES})
-    set(SYS_LINK_DIRS ${FREETYPE_LIBRARY_DIRS} ${RSVG_LIBRARY_DIRS})
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
     list(APPEND SYS_INCLUDE_DIRS ${FONTCONFIG_INCLUDE_DIRS})
     list(APPEND SYS_LIBRARIES ${FONTCONFIG_LIBRARIES})

@@ -21,9 +21,9 @@ jobs:
           submodules: true
       - uses: ilammy/msvc-dev-cmd@v1.13.0
         if: runner.os == 'Windows'
-      - name: Cache vcpkg packages
+      - name: Restore vcpkg cache
         if: runner.os == 'Windows'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: C:/vcpkg/installed
           key: vcpkg-x64-windows-${{ hashFiles('pyproject.toml') }}
@@ -31,6 +31,12 @@ jobs:
         uses: pypa/cibuildwheel@v3.4.1
         with:
           output-dir: wheelhouse
+      - name: Save vcpkg cache
+        if: runner.os == 'Windows' && always()
+        uses: actions/cache/save@v4
+        with:
+          path: C:/vcpkg/installed
+          key: vcpkg-x64-windows-${{ hashFiles('pyproject.toml') }}
 
       - uses: actions/upload-artifact@v4
         with:
