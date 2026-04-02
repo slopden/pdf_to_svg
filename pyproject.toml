@@ -22,7 +22,7 @@ skip = "*-musllinux* *-win32"
 build = "cp312-*"
 
 [tool.cibuildwheel.linux]
-before-all = "yum install -y freetype-devel fontconfig-devel libpng-devel pixman-devel zlib-devel meson ninja-build librsvg2-devel glib2-devel"
+before-all = "yum install -y epel-release && yum install -y freetype-devel fontconfig-devel libpng-devel pixman-devel zlib-devel meson ninja-build librsvg2-devel glib2-devel"
 environment = { LD_LIBRARY_PATH = "/project/_deps_install/lib" }
 repair-wheel-command = "auditwheel repair -w {dest_dir} {wheel}"
 

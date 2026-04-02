@@ -154,6 +154,25 @@ def test_roundtrip_rect():
     assert "rect" in pages[0] or "path" in pages[0]
 
 
+def test_roundtrip_preserves_dimensions():
+    """SVG → PDF → SVG preserves page dimensions (within 1%)."""
+    import re
+
+    for w_px, h_px in [(200, 100), (800, 600), (72, 72)]:
+        svg = f'<svg xmlns="http://www.w3.org/2000/svg" width="{w_px}" height="{h_px}"/>'.encode()
+        pdf = svg_to_pdf(svg)
+        # round-trip back to SVG in pt
+        out = pdf_to_svg(pdf, unit="pt")[0]
+        # extract width/height from the output SVG
+        m = re.search(r'width="([^"]+)pt".*height="([^"]+)pt"', out)
+        assert m, f"couldn't parse dimensions from: {out[:200]}"
+        out_w, out_h = float(m.group(1)), float(m.group(2))
+        # expected: px * 72/96
+        exp_w, exp_h = w_px * 72 / 96, h_px * 72 / 96
+        assert out_w == pytest.approx(exp_w), f"width: {out_w} != {exp_w}"
+        assert out_h == pytest.approx(exp_h), f"height: {out_h} != {exp_h}"
+
+
 def test_roundtrip_multiple_elements():
     """SVG with multiple elements survives round-trip."""
     svg = (

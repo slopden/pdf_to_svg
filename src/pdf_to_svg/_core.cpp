@@ -168,17 +168,9 @@ std::vector<std::string> pdf_to_svg(const nb::bytes& data, std::optional<int> pa
 // SVG → PDF
 // ============================================================================
 
-// Convert an RsvgLength to points
-static double rsvg_length_to_pt(RsvgLength len) {
-    switch (len.unit) {
-        case RSVG_UNIT_PT:   return len.length;
-        case RSVG_UNIT_PX:   return len.length * 0.75;        // 96 DPI → 72 DPI
-        case RSVG_UNIT_IN:   return len.length * 72.0;
-        case RSVG_UNIT_CM:   return len.length * 72.0 / 2.54;
-        case RSVG_UNIT_MM:   return len.length * 72.0 / 25.4;
-        default:             return len.length;                // EM/EX/% — treat as pt
-    }
-}
+// CSS px (1/96 in) → PDF pt (1/72 in): pt = px * 72/96
+// Both are ISO/W3C standards; this is the exact conversion, not a heuristic.
+constexpr double PX_TO_PT = 72.0 / 96.0;
 
 nb::bytes svg_to_pdf(const nb::bytes& data) {
     GError* err = nullptr;
@@ -190,13 +182,13 @@ nb::bytes svg_to_pdf(const nb::bytes& data) {
         throw std::runtime_error(msg);
     }
 
-    // get intrinsic dimensions
-    gboolean has_w = FALSE, has_h = FALSE;
-    RsvgLength rw, rh;
-    rsvg_handle_get_intrinsic_dimensions(handle.get(), &has_w, &rw, &has_h, &rh, nullptr, nullptr);
+    // get dimensions in px (stable API, available in all librsvg versions)
+    RsvgDimensionData dim;
+    rsvg_handle_get_dimensions(handle.get(), &dim);
 
-    double w = (has_w && rw.length > 0) ? rsvg_length_to_pt(rw) : 612.0;  // letter
-    double h = (has_h && rh.length > 0) ? rsvg_length_to_pt(rh) : 792.0;
+    // convert px (96 DPI) to points (72 DPI); fall back to letter size
+    double w = (dim.width  > 0) ? dim.width  * PX_TO_PT : 612.0;
+    double h = (dim.height > 0) ? dim.height * PX_TO_PT : 792.0;
 
     std::string out;
     out.reserve(65536);
@@ -204,13 +196,11 @@ nb::bytes svg_to_pdf(const nb::bytes& data) {
     SurfacePtr surface(cairo_pdf_surface_create_for_stream(write_to_string, &out, w, h));
     auto cr = make_cairo(surface.get(), "PDF");
 
-    RsvgRectangle viewport = {0, 0, w, h};
-    err = nullptr;
-    if (!rsvg_handle_render_document(handle.get(), cr.get(), &viewport, &err)) {
-        std::string msg = "Failed to render SVG";
-        if (err) { msg += ": "; msg += err->message; g_error_free(err); }
-        throw std::runtime_error(msg);
-    }
+    // scale from pt surface to px so librsvg renders at the right size
+    cairo_scale(cr.get(), PX_TO_PT, PX_TO_PT);
+
+    if (!rsvg_handle_render_cairo(handle.get(), cr.get()))
+        throw std::runtime_error("Failed to render SVG");
 
     cairo_show_page(cr.get());
     flush(cr, surface);
