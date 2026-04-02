@@ -19,7 +19,7 @@ set(CAIRO_MESON_OPTIONS
     -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
     -Dfreetype2:harfbuzz=disabled -Dfreetype2:bzip2=disabled -Dfreetype2:brotli=disabled)
 if(WIN32)
-    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled -Dquartz=disabled --wrap-mode=forcefallback)
+    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled -Dquartz=disabled --force-fallback-for=zlib,libpng,freetype2,pixman)
 elseif(APPLE)
     list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=enabled)
 else()
@@ -77,7 +77,15 @@ pkg_check_modules(RSVG REQUIRED librsvg-2.0)
 set(SYS_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS} ${RSVG_INCLUDE_DIRS})
 set(SYS_LIBRARIES ${FREETYPE_LIBRARIES} ${RSVG_LIBRARIES})
 set(SYS_LINK_DIRS ${FREETYPE_LIBRARY_DIRS} ${RSVG_LIBRARY_DIRS})
-if(NOT WIN32)
+if(WIN32)
+    # _core.cpp calls g_object_unref / g_error_free directly; on Linux/macOS
+    # these resolve through librsvg's DSO chain, but Windows needs explicit links.
+    pkg_check_modules(GOBJECT REQUIRED gobject-2.0)
+    pkg_check_modules(GLIB REQUIRED glib-2.0)
+    list(APPEND SYS_INCLUDE_DIRS ${GOBJECT_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
+    list(APPEND SYS_LIBRARIES ${GOBJECT_LIBRARIES} ${GLIB_LIBRARIES})
+    list(APPEND SYS_LINK_DIRS ${GOBJECT_LIBRARY_DIRS} ${GLIB_LIBRARY_DIRS})
+else()
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
     list(APPEND SYS_INCLUDE_DIRS ${FONTCONFIG_INCLUDE_DIRS})
     list(APPEND SYS_LIBRARIES ${FONTCONFIG_LIBRARIES})
@@ -141,3 +149,8 @@ install(TARGETS _core LIBRARY DESTINATION pdf_to_svg)
 install(DIRECTORY ${DEPS_PREFIX}/lib/ DESTINATION pdf_to_svg/.libs
     FILES_MATCHING PATTERN "*.so*" PATTERN "*.dylib*" PATTERN "*.dll"
     PATTERN "pkgconfig" EXCLUDE PATTERN "cmake" EXCLUDE)
+if(WIN32)
+    # Meson installs DLLs to bin/ on Windows, not lib/
+    install(DIRECTORY ${DEPS_PREFIX}/bin/ DESTINATION pdf_to_svg/.libs
+        FILES_MATCHING PATTERN "*.dll")
+endif()
