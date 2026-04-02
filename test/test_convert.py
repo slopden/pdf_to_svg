@@ -56,10 +56,12 @@ def test_units():
 
 
 def test_page_out_of_range():
-    """Test that out-of-range page numbers return empty list."""
+    """Test that out-of-range page numbers raise IndexError."""
+    import pytest
+
     data = get("test_500_1000_mm.pdf")
-    result = pdf_to_svg(data, page=999)
-    assert result == []
+    with pytest.raises(IndexError):
+        pdf_to_svg(data, page=999)
 
 
 def test_single_page():

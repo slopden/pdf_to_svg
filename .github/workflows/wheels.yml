@@ -18,14 +18,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          submodules: true      
+          submodules: true
       - uses: ilammy/msvc-dev-cmd@v1.13.0
         if: runner.os == 'Windows'
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.3.1
         with:
           output-dir: wheelhouse
-      
+
       - uses: actions/upload-artifact@v4
         with:
           path: ./wheelhouse/*.whl
