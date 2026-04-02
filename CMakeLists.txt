@@ -19,7 +19,7 @@ set(CAIRO_MESON_OPTIONS
     -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
     -Dfreetype:harfbuzz=disabled)
 if(WIN32)
-    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled)
+    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled --force-fallback-for=zlib)
 else()
     list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled)
 endif()
