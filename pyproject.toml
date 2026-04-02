@@ -35,4 +35,4 @@ repair-wheel-command = "DYLD_LIBRARY_PATH={project}/_deps_install/lib delocate-w
 
 [tool.cibuildwheel.windows]
 before-all = "pacman -S --noconfirm mingw-w64-ucrt-x86_64-librsvg mingw-w64-ucrt-x86_64-pkg-config"
-environment = { PKG_CONFIG_PATH = "C:/msys64/ucrt64/lib/pkgconfig", PATH = "C:/msys64/usr/bin;C:/msys64/ucrt64/bin;$PATH" }
+environment = { PKG_CONFIG_PATH = "C:/msys64/ucrt64/lib/pkgconfig", PATH = "$PATH;C:/msys64/usr/bin;C:/msys64/ucrt64/bin" }
