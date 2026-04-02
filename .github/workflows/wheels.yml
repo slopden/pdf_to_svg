@@ -21,6 +21,12 @@ jobs:
           submodules: true
       - uses: ilammy/msvc-dev-cmd@v1.13.0
         if: runner.os == 'Windows'
+      - name: Cache vcpkg packages
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: C:/vcpkg/installed
+          key: vcpkg-x64-windows-${{ hashFiles('pyproject.toml') }}
       - name: Build wheels
         uses: pypa/cibuildwheel@v3.4.1
         with:
