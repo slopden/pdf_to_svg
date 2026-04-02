@@ -1,5 +1,5 @@
 [build-system]
-requires = ["scikit-build-core>=0.10", "nanobind>=2.0", "meson>=1.3", "ninja"]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.12", "meson>=1.3", "ninja"]
 build-backend = "scikit_build_core.build"
 
 [project]
@@ -18,10 +18,10 @@ cmake.build-type = "Release"
 wheel.py-api = "cp312"
 
 [tool.cibuildwheel]
-skip = "*-musllinux* *-win32"
+skip = "*-musllinux* *-win32 *t-*"
 build = "cp312-*"
 test-requires = ["pytest", "abi3audit"]
-test-command = "abi3audit {wheel} && pytest {project}/test"
+test-command = "abi3audit --verbose {wheel} && pytest {project}/test"
 
 [tool.cibuildwheel.linux]
 before-all = "yum install -y epel-release && yum install -y freetype-devel fontconfig-devel libpng-devel pixman-devel zlib-devel meson ninja-build librsvg2-devel glib2-devel"
