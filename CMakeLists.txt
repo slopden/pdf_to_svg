@@ -13,15 +13,17 @@ set(DEPS_PREFIX "${CMAKE_SOURCE_DIR}/_deps_install")
 set(CAIRO_MESON_OPTIONS
     --prefix=${DEPS_PREFIX} --libdir=lib --buildtype=release
     -Ddefault_library=shared -Dtests=disabled -Dgtk_doc=false
-    -Dlzo=disabled -Dquartz=disabled -Dxcb=disabled -Dxlib=disabled
+    -Dlzo=disabled -Dxcb=disabled -Dxlib=disabled
     -Dxlib-xcb=disabled -Dtee=disabled -Dspectre=disabled
     -Dsymbol-lookup=disabled -Dglib=disabled
     -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
     -Dfreetype:harfbuzz=disabled)
 if(WIN32)
-    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled --force-fallback-for=zlib)
+    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled -Dquartz=disabled --force-fallback-for=zlib)
+elseif(APPLE)
+    list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=enabled)
 else()
-    list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled)
+    list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=disabled)
 endif()
 
 ExternalProject_Add(cairo_ext
