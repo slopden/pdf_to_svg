@@ -9,40 +9,40 @@ include(ExternalProject)
 # all vendored deps install here so auditwheel/delocate can find them
 set(DEPS_PREFIX "${CMAKE_SOURCE_DIR}/_deps_install")
 
-# ============== Cairo (via Meson) ==============
-set(CAIRO_MESON_OPTIONS
-    --prefix=${DEPS_PREFIX} --libdir=lib --buildtype=release
-    -Ddefault_library=shared -Dtests=disabled -Dgtk_doc=false
-    -Dlzo=disabled -Dxcb=disabled -Dxlib=disabled
-    -Dxlib-xcb=disabled -Dtee=disabled -Dspectre=disabled
-    -Dsymbol-lookup=disabled -Dglib=disabled
-    -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
-    -Dfreetype2:harfbuzz=disabled -Dfreetype2:bzip2=disabled -Dfreetype2:brotli=disabled)
-if(WIN32)
-    list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled -Dquartz=disabled --force-fallback-for=zlib,libpng,freetype2,pixman)
-elseif(APPLE)
-    list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=enabled)
-else()
-    list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=disabled)
-endif()
+# ============== Cairo ==============
+# On Windows, cairo comes from vcpkg (consistent ABI with librsvg).
+# On Linux/macOS, build from source via meson.
+if(NOT WIN32)
+    set(CAIRO_MESON_OPTIONS
+        --prefix=${DEPS_PREFIX} --libdir=lib --buildtype=release
+        -Ddefault_library=shared -Dtests=disabled -Dgtk_doc=false
+        -Dlzo=disabled -Dxcb=disabled -Dxlib=disabled
+        -Dxlib-xcb=disabled -Dtee=disabled -Dspectre=disabled
+        -Dsymbol-lookup=disabled -Dglib=disabled
+        -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
+        -Dfreetype2:harfbuzz=disabled -Dfreetype2:bzip2=disabled -Dfreetype2:brotli=disabled)
+    if(APPLE)
+        list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=enabled)
+    else()
+        list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=disabled)
+    endif()
 
-# On Windows, isolate the meson build from MSYS2 pkg-config so no
-# MinGW-compiled libraries leak into the MSVC build.
-if(WIN32)
-    set(CAIRO_CONFIGURE_PREFIX ${CMAKE_COMMAND} -E env --unset=PKG_CONFIG_PATH --unset=PKG_CONFIG)
-else()
-    set(CAIRO_CONFIGURE_PREFIX "")
+    ExternalProject_Add(cairo_ext
+        SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
+        CONFIGURE_COMMAND meson setup ${CAIRO_MESON_OPTIONS} <BINARY_DIR> <SOURCE_DIR>
+        BUILD_COMMAND meson compile -C <BINARY_DIR>
+        INSTALL_COMMAND meson install -C <BINARY_DIR>)
 endif()
-
-ExternalProject_Add(cairo_ext
-    SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
-    CONFIGURE_COMMAND ${CAIRO_CONFIGURE_PREFIX} meson setup ${CAIRO_MESON_OPTIONS} <BINARY_DIR> <SOURCE_DIR>
-    BUILD_COMMAND meson compile -C <BINARY_DIR>
-    INSTALL_COMMAND meson install -C <BINARY_DIR>)
 
 # ============== Poppler (via CMake) ==============
 set(POPPLER_PKG_CONFIG_PATH
     "${DEPS_PREFIX}/lib/pkgconfig:/usr/lib64/pkgconfig:/usr/share/pkgconfig:/opt/homebrew/lib/pkgconfig:/usr/local/lib/pkgconfig:$ENV{PKG_CONFIG_PATH}")
+
+# On Windows poppler finds cairo from vcpkg; on others from our meson build.
+set(POPPLER_EXTRA_ARGS "")
+if(NOT WIN32)
+    list(APPEND POPPLER_EXTRA_ARGS DEPENDS cairo_ext)
+endif()
 
 ExternalProject_Add(poppler_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/poppler"
@@ -67,7 +67,7 @@ ExternalProject_Add(poppler_ext
         -S <SOURCE_DIR> -B <BINARY_DIR>
     BUILD_COMMAND ${CMAKE_COMMAND} --build <BINARY_DIR> --config Release
     INSTALL_COMMAND ${CMAKE_COMMAND} --install <BINARY_DIR> --config Release
-    DEPENDS cairo_ext)
+    ${POPPLER_EXTRA_ARGS})
 
 # ============== System dependencies ==============
 # pkgconf from vcpkg on Windows, system pkg-config on Linux/macOS.
@@ -79,13 +79,15 @@ set(SYS_INCLUDE_DIRS ${FREETYPE_INCLUDE_DIRS} ${RSVG_INCLUDE_DIRS})
 set(SYS_LIBRARIES ${FREETYPE_LIBRARIES} ${RSVG_LIBRARIES})
 set(SYS_LINK_DIRS ${FREETYPE_LIBRARY_DIRS} ${RSVG_LIBRARY_DIRS})
 if(WIN32)
-    # _core.cpp calls g_object_unref / g_error_free directly; on Linux/macOS
+    # On Windows, cairo comes from vcpkg (not built from source).
+    # _core.cpp also calls g_object_unref / g_error_free directly; on Linux/macOS
     # these resolve through librsvg's DSO chain, but Windows needs explicit links.
+    pkg_check_modules(CAIRO REQUIRED cairo)
     pkg_check_modules(GOBJECT REQUIRED gobject-2.0)
     pkg_check_modules(GLIB REQUIRED glib-2.0)
-    list(APPEND SYS_INCLUDE_DIRS ${GOBJECT_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
-    list(APPEND SYS_LIBRARIES ${GOBJECT_LIBRARIES} ${GLIB_LIBRARIES})
-    list(APPEND SYS_LINK_DIRS ${GOBJECT_LIBRARY_DIRS} ${GLIB_LIBRARY_DIRS})
+    list(APPEND SYS_INCLUDE_DIRS ${CAIRO_INCLUDE_DIRS} ${GOBJECT_INCLUDE_DIRS} ${GLIB_INCLUDE_DIRS})
+    list(APPEND SYS_LIBRARIES ${CAIRO_LIBRARIES} ${GOBJECT_LIBRARIES} ${GLIB_LIBRARIES})
+    list(APPEND SYS_LINK_DIRS ${CAIRO_LIBRARY_DIRS} ${GOBJECT_LIBRARY_DIRS} ${GLIB_LIBRARY_DIRS})
 else()
     pkg_check_modules(FONTCONFIG REQUIRED fontconfig)
     list(APPEND SYS_INCLUDE_DIRS ${FONTCONFIG_INCLUDE_DIRS})
@@ -129,13 +131,18 @@ target_include_directories(_core PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${DEPS_PREFIX}/include
     ${DEPS_PREFIX}/include/poppler
-    ${DEPS_PREFIX}/include/cairo
     ${CMAKE_SOURCE_DIR}/upstream/poppler         # for goo/ft_utils.h
     ${CMAKE_SOURCE_DIR}/upstream/poppler/poppler # for CairoOutputDev.h
     ${SYS_INCLUDE_DIRS})
 
 target_link_directories(_core PRIVATE ${DEPS_PREFIX}/lib ${SYS_LINK_DIRS})
-target_link_libraries(_core PRIVATE poppler cairo ${SYS_LIBRARIES})
+if(WIN32)
+    # On Windows, cairo is in SYS_LIBRARIES (from vcpkg via pkg_check_modules)
+    target_link_libraries(_core PRIVATE poppler ${SYS_LIBRARIES})
+else()
+    # On Linux/macOS, cairo is from our meson build in DEPS_PREFIX
+    target_link_libraries(_core PRIVATE poppler cairo ${SYS_LIBRARIES})
+endif()
 
 # RPATH so the installed .so finds bundled libs relative to itself
 set_target_properties(_core PROPERTIES BUILD_RPATH "${DEPS_PREFIX}/lib")
@@ -151,7 +158,6 @@ install(DIRECTORY ${DEPS_PREFIX}/lib/ DESTINATION pdf_to_svg/.libs
     FILES_MATCHING PATTERN "*.so*" PATTERN "*.dylib*" PATTERN "*.dll"
     PATTERN "pkgconfig" EXCLUDE PATTERN "cmake" EXCLUDE)
 if(WIN32)
-    # Meson installs DLLs to bin/ on Windows, not lib/
     install(DIRECTORY ${DEPS_PREFIX}/bin/ DESTINATION pdf_to_svg/.libs
         FILES_MATCHING PATTERN "*.dll")
 endif()
