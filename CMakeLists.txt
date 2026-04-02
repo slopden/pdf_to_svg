@@ -16,7 +16,8 @@ set(CAIRO_MESON_OPTIONS
     -Dlzo=disabled -Dquartz=disabled -Dxcb=disabled -Dxlib=disabled
     -Dxlib-xcb=disabled -Dtee=disabled -Dspectre=disabled
     -Dsymbol-lookup=disabled -Dglib=disabled
-    -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled)
+    -Dfreetype=enabled -Dpng=enabled -Dzlib=enabled
+    -Dfreetype:harfbuzz=disabled)
 if(WIN32)
     list(APPEND CAIRO_MESON_OPTIONS --vsenv -Dfontconfig=disabled -Ddwrite=enabled)
 else()
