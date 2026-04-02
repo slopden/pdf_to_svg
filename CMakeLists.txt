@@ -26,9 +26,17 @@ else()
     list(APPEND CAIRO_MESON_OPTIONS -Dfontconfig=enabled -Dquartz=disabled)
 endif()
 
+# On Windows, isolate the meson build from MSYS2 pkg-config so no
+# MinGW-compiled libraries leak into the MSVC build.
+if(WIN32)
+    set(CAIRO_CONFIGURE_PREFIX ${CMAKE_COMMAND} -E env --unset=PKG_CONFIG_PATH --unset=PKG_CONFIG)
+else()
+    set(CAIRO_CONFIGURE_PREFIX "")
+endif()
+
 ExternalProject_Add(cairo_ext
     SOURCE_DIR "${CMAKE_SOURCE_DIR}/upstream/cairo"
-    CONFIGURE_COMMAND meson setup ${CAIRO_MESON_OPTIONS} <BINARY_DIR> <SOURCE_DIR>
+    CONFIGURE_COMMAND ${CAIRO_CONFIGURE_PREFIX} meson setup ${CAIRO_MESON_OPTIONS} <BINARY_DIR> <SOURCE_DIR>
     BUILD_COMMAND meson compile -C <BINARY_DIR>
     INSTALL_COMMAND meson install -C <BINARY_DIR>)
 
